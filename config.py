@@ -19,6 +19,10 @@ MAX_CLOUD_PREDICTIONS = 1
 # lihat utils.MIN_DURATION_SECONDS/MAX_DURATION_SECONDS untuk itu)
 MIN_RECORD_DURATION_SECONDS = 0.4
 
+# Batas atas rekam mikrofon untuk STT — sengaja dipisah dari utils.MAX_DURATION_SECONDS
+# (jendela tetap 4 dtk milik model SER). Disamakan dengan chunk_length_s=30 di
+# utils.transcribe_audio agar rekaman mic selalu masuk 1 chunk Whisper (tanpa stride).
+MAX_RECORD_DURATION_SECONDS = 30
 
 EMOTION_ICONS = {
     "netral": "😐",

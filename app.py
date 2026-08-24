@@ -39,7 +39,6 @@ preload_whisper()
 pages = [
     st.Page("pages/home.py", title="Home", icon=":material/home:", default=True),
     st.Page("pages/analisis.py", title="Analisis Emosi", icon=":material/mic:"),
-    st.Page("pages/dashboard.py", title="Dashboard", icon=":material/dashboard:"),
     st.Page("pages/model.py", title="Model", icon=":material/psychology:"),
     st.Page("pages/dataset.py", title="Dataset", icon=":material/dataset:"),
 ]
