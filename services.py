@@ -26,6 +26,7 @@ MODEL_CONFIG_PATH = MODELS_DIR / "config_v4.json"
 TEST_EVALUATION_PATH = MODELS_DIR / "evaluasi_test_v4.csv"
 LABEL_NOISE_PATH = MODELS_DIR / "label_noise_candidates.csv"
 TRAINING_HISTORY_PATH = MODELS_DIR / "history_v4.json"
+TRAINING_CURVE_IMAGE_PATH = MODELS_DIR / "kurva_training_v4.png"
 
 
 @st.cache_resource(show_spinner="Memuat model WavLM...")

@@ -9,7 +9,13 @@ import torch
 from sklearn.metrics import classification_report
 
 from config import MODEL_DISPLAY_PATH, SER_BACKBONE
-from services import load_model_metrics, load_ser_model, load_test_evaluation, load_training_history
+from services import (
+    TRAINING_CURVE_IMAGE_PATH,
+    load_model_metrics,
+    load_ser_model,
+    load_test_evaluation,
+    load_training_history,
+)
 from utils import ID2LABEL
 from components.css import inject_custom_css
 from components.ui import render_section_header
@@ -141,7 +147,7 @@ def main() -> None:
         """
         <div class="hero-card">
             <div class="hero-title">Model</div>
-            <p class="hero-subtitle">Arsitektur, performa training, dan evaluasi model WavLM SER v7.</p>
+            <p class="hero-subtitle">Arsitektur, performa training, dan evaluasi model WavLM SER v4.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -169,14 +175,21 @@ def main() -> None:
     history = load_training_history()
     if history:
         _render_training_curves(history)
+    elif TRAINING_CURVE_IMAGE_PATH.exists():
+        render_section_header("Training", "Kurva Akurasi & Loss per Epoch")
+        st.image(
+            str(TRAINING_CURVE_IMAGE_PATH),
+            caption="Kurva training v4 (gambar statis — data JSON mentah tidak tersedia)",
+            width="stretch",
+        )
     else:
-        st.info("File history_v7.json tidak ditemukan — kurva training tidak dapat ditampilkan.")
+        st.info("File history_v4.json tidak ditemukan — kurva training tidak dapat ditampilkan.")
 
     eval_df = load_test_evaluation()
     if eval_df is not None:
         _render_confusion_matrix(eval_df)
     else:
-        st.info("File evaluasi_test_v7.csv tidak ditemukan — confusion matrix tidak dapat ditampilkan.")
+        st.info("File evaluasi_test_v4.csv tidak ditemukan — confusion matrix tidak dapat ditampilkan.")
 
     with st.expander("Konfigurasi Training"):
         st.caption(f"Backbone: {SER_BACKBONE}")

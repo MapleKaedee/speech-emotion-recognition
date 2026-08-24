@@ -33,7 +33,7 @@ def main() -> None:
 
     df = load_dataset_metadata()
     if df is None:
-        st.warning("File metadata dataset (models/metadata_split_v7.csv) tidak ditemukan.")
+        st.warning("File metadata dataset (models/metadata_split_v4.csv) tidak ditemukan.")
         return
 
     c1, c2, c3, c4 = st.columns(4)
