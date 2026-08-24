@@ -99,4 +99,4 @@ def main() -> None:
         st.page_link("pages/model.py", label="Lihat detail Model →", icon=":material/psychology:")
 
 
-main()
+main()  

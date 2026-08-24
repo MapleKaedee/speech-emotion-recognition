@@ -99,7 +99,7 @@ def _trim_silence(y: np.ndarray) -> np.ndarray:
 
     Guard `len(yt) >= MIN_SAMPLES` mencegah audio lirih (misal rekaman
     mikrofon bervolume rendah) hilang total akibat trim yang terlalu agresif.
-    Identik dengan `load_waveform()` pada ser-augmemted.ipynb.
+    Identik dengan `load_waveform()` pada pipeline/ver4-ser-pipeline.ipynb.
     """
     trimmed, _ = librosa.effects.trim(y, top_db=SILENCE_TRIM_TOP_DB)
     if len(trimmed) >= MIN_SAMPLES:
@@ -116,15 +116,13 @@ def _peak_normalize(y: np.ndarray) -> np.ndarray:
 
 
 def _fix_length_eval(y: np.ndarray) -> np.ndarray:
-    """Center-crop jika > MAX_SAMPLES, right zero-pad jika < MAX_SAMPLES.
+    """Ambil dari awal jika > MAX_SAMPLES, right zero-pad jika lebih pendek.
 
-    Mode eval WAJIB center crop (bukan potong dari awal) agar konsisten
-    dengan `fix_length(mode='eval')` pada notebook v7. Model dilatih dengan
-    asumsi ini; crop dari awal akan mengubah distribusi input.
+    Mode eval WAJIB mengambil segmen dari awal agar konsisten dengan
+    `fix_length(mode='eval')` pada pipeline v4.
     """
     if len(y) > MAX_SAMPLES:
-        start = max(0, (len(y) - MAX_SAMPLES) // 2)
-        y = y[start : start + MAX_SAMPLES]
+        y = y[:MAX_SAMPLES]
     elif len(y) < MAX_SAMPLES:
         y = np.pad(y, (0, MAX_SAMPLES - len(y)), mode="constant")
     return y.astype(np.float32)
@@ -134,12 +132,12 @@ def preprocess_audio(
     audio: torch.Tensor,
     sample_rate: int,
 ) -> tuple[torch.Tensor, dict[str, Any]]:
-    """Preprocessing SER sesuai kontrak v7 (ser-augmemted.ipynb Cell 6).
+    """Preprocessing SER sesuai kontrak v4 (pipeline Cell 37).
 
     Urutan wajib: mono -> resample 16kHz -> sanitasi NaN -> trim silence
-    30dB -> peak normalization -> center-crop/zero-pad ke MAX_SAMPLES.
+    30dB -> peak normalization -> crop dari awal/zero-pad ke MAX_SAMPLES.
     Menyimpang dari urutan ini membuat input inferensi berbeda dari
-    kondisi training checkpoint v7.
+    kondisi training checkpoint v4.
     """
     if audio.ndim == 1:
         audio = audio.unsqueeze(0)
@@ -148,10 +146,13 @@ def preprocess_audio(
 
     original_duration = audio.shape[-1] / sample_rate
 
-    if sample_rate != TARGET_SAMPLE_RATE:
-        audio = torchaudio.functional.resample(audio, sample_rate, TARGET_SAMPLE_RATE)
-
     y = audio.squeeze(0).numpy().astype(np.float32)
+    if sample_rate != TARGET_SAMPLE_RATE:
+        y = librosa.resample(
+            y,
+            orig_sr=sample_rate,
+            target_sr=TARGET_SAMPLE_RATE,
+        )
     y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
     y = _trim_silence(y)
     y = _peak_normalize(y)
@@ -281,7 +282,7 @@ _whisper_config_key: tuple[str, str] | None = None
 
 
 def create_whisper_pipeline(model_name: str, device_name: str) -> Any:
-    """Buat pipeline Whisper ASR — hanya dipanggil on-demand, bukan saat startup."""
+    """Buat pipeline Whisper ASR yang dipreload dan dicache oleh Streamlit."""
     from transformers import pipeline
 
     device = 0 if device_name == "cuda" else -1
@@ -366,7 +367,7 @@ def predict_emotion(
     """Jalankan inferensi emosi pada waveform 1D yang sudah dipreprocess.
 
     Argumen processor WAJIB identik dengan pemanggilan feature_extractor
-    pada ser-augmemted.ipynb (fungsi prediksi Cell 15). Tanpa
+    pada pipeline/ver4-ser-pipeline.ipynb. Tanpa
     `return_tensors="pt"`, hasil BatchFeature berisi list numpy, bukan
     tensor, sehingga `.to(device)` melempar AttributeError.
     """

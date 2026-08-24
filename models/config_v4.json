@@ -1,0 +1,35 @@
+{
+  "version": "v4-base-plus-optimized-noise-aware",
+  "model_source": "microsoft/wavlm-base-plus",
+  "emosi_list": [
+    "netral",
+    "senang",
+    "sedih",
+    "marah",
+    "takut",
+    "jijik"
+  ],
+  "max_seconds": 4.0,
+  "dropout": 0.3,
+  "label_smoothing": 0.0,
+  "mixup_alpha": 0.2,
+  "mixup_prob": 0.25,
+  "use_mixup": false,
+  "best_checkpoint_file": "ser_wavlm_v4_stage2_best.pt",
+  "checkpoint_lineage": "v3 Stage 2 input -> v4 Stage 1 -> v4 Stage 2",
+  "test_macro_precision": 0.8534299227985711,
+  "test_macro_recall": 0.8527026269837771,
+  "test_macro_f1": 0.8528122496561141,
+  "cremad_bobot_per_kelas": {
+    "netral": 0.957,
+    "marah": 0.606,
+    "jijik": 0.35,
+    "takut": 0.35,
+    "senang": 0.35,
+    "sedih": 0.35
+  },
+  "noise_candidates_count": 1,
+  "best_epoch": 3,
+  "best_val_acc": 0.8416901606573185,
+  "test_acc": 0.8552112676056338
+}

@@ -21,11 +21,11 @@ from utils import MIN_DURATION_SECONDS, TARGET_SAMPLE_RATE, load_audio, preproce
 from config import SER_BACKBONE
 
 MODELS_DIR = Path(__file__).resolve().parent / "models"
-DATASET_METADATA_PATH = MODELS_DIR / "metadata_split_v7.csv"
-MODEL_CONFIG_PATH = MODELS_DIR / "config_v7.json"
-TEST_EVALUATION_PATH = MODELS_DIR / "evaluasi_test_v7.csv"
+DATASET_METADATA_PATH = MODELS_DIR / "metadata_split_v4.csv"
+MODEL_CONFIG_PATH = MODELS_DIR / "config_v4.json"
+TEST_EVALUATION_PATH = MODELS_DIR / "evaluasi_test_v4.csv"
 LABEL_NOISE_PATH = MODELS_DIR / "label_noise_candidates.csv"
-TRAINING_HISTORY_PATH = MODELS_DIR / "history_v7.json"
+TRAINING_HISTORY_PATH = MODELS_DIR / "history_v4.json"
 
 
 @st.cache_resource(show_spinner="Memuat model WavLM...")
@@ -42,7 +42,7 @@ def load_feature_extractor():
 
 @st.cache_resource(show_spinner="Memuat Whisper (STT)...")
 def load_whisper_lazy(model_name: str, device_name: str):
-    """Cache pipeline Whisper — hanya dimuat saat user pertama kali minta transkrip."""
+    """Cache pipeline Whisper agar hanya dimuat satu kali per proses aplikasi."""
     from utils import create_whisper_pipeline
     return create_whisper_pipeline(model_name, device_name)
 
@@ -57,7 +57,7 @@ def load_dataset_metadata() -> pd.DataFrame | None:
 
 @st.cache_data(show_spinner=False)
 def load_model_metrics() -> dict | None:
-    """Metrik training model (akurasi, epoch terbaik, dst) dari config_v7.json."""
+    """Metrik training model (akurasi, epoch terbaik, dst) dari config_v4.json."""
     if not MODEL_CONFIG_PATH.exists():
         return None
     with open(MODEL_CONFIG_PATH) as f:
