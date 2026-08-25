@@ -1,146 +1,291 @@
-# Speech Emotion Recognition (SER) & Whisper STT App
+# Speech Emotion Recognition
 
-Aplikasi web berbasis Streamlit untuk mendeteksi emosi ucapan (Speech Emotion Recognition) menggunakan arsitektur WavLM (`microsoft/wavlm-base-plus`) versi v7 yang diintegrasikan dengan transkrip teks otomatis Whisper STT (`openai/whisper-small`).
+## Identitas Proyek
 
----
+Proyek ini dibuat oleh:
+
+1. Farros Rifantiarno Ramadhani, `A11.2024.15694`
+2. Devin Abiyyu Pandu Pratama, `A11.2024.15980`
+3. Nuur Wahid Saifullah, `A11.2024.15974`
+
+Link aplikasi: [emotionrecognitionspeech.streamlit.app](https://emotionrecognitionspeech.streamlit.app/)
+
+## Deskripsi
+
+Aplikasi web Speech Emotion Recognition (SER) untuk mendeteksi emosi dari audio ucapan. Sistem menggunakan model WavLM base-plus yang telah dilatih pada beberapa dataset emosi, kemudian menggabungkannya dengan Whisper untuk transkripsi suara dan analisis emosi per segmen.
+
+Label emosi yang digunakan: `netral`, `senang`, `sedih`, `marah`, `takut`, dan `jijik`.
 
 ## Fitur Utama
 
-- Analisis Emosi Berbasis WavLM v7: Mendeteksi 6 kelas emosi (netral, senang, sedih, marah, takut, jijik) dengan model WavLM + Attentive Pooling yang dilatih pada multi-corpus dataset.
-- Transkrip Teks Otomatis (Speech-to-Text): Mentranskripsi pembicaraan audio penuh menggunakan OpenAI Whisper via transformers (tanpa butuh instalasi binary FFmpeg).
-- Visualisasi Probabilitas: Menampilkan tingkat kepercayaan (confidence score) dan grafik batang probabilitas emosi.
-- Auto-Download Checkpoint: Otomatis mendownload checkpoint model `ser_wavlm_v7_best.pt` dari Google Drive jika belum ada di lokal.
-- Mobile-First Responsive Interface: Antarmuka adaptif yang nyaman diakses dari smartphone maupun desktop.
+- Mengunggah file audio `.wav` atau `.mp3`.
+- Merekam audio langsung dari mikrofon.
+- Mendeteksi satu emosi utama dari audio.
+- Menampilkan probabilitas keenam kelas emosi.
+- Menampilkan top 3 emosi dan confidence score.
+- Menampilkan waveform dan metadata audio.
+- Mentranskripsikan audio penuh menggunakan `openai/whisper-small`.
+- Menganalisis emosi berdasarkan timestamp dari transkripsi Whisper.
+- Menampilkan dashboard dataset dan evaluasi model jika artefaknya tersedia.
+- Mencache model dengan `st.cache_resource` agar tidak dimuat ulang pada setiap interaksi.
 
----
+## Model dan Hugging Face
 
-## Spesifikasi Inferensi Model
+Model SER utama adalah checkpoint v4:
 
-| Parameter                  | Spesifikasi                                |
-| :------------------------- | :----------------------------------------- |
-| Model Backbone             | `microsoft/wavlm-base-plus`              |
-| Model Checkpoint           | `models/ser_wavlm_v7_best.pt` (WavLM v7) |
-| Sample Rate Input          | 16,000 Hz (Mono)                           |
-| Durasi Maksimum SER        | 4.0 detik (pad / crop otomatis)            |
-| Transkrip STT              | Audio Gelombang Penuh (Full Waveform)      |
-| Fungsi Aktivasi Classifier | `nn.GELU()`                              |
+```text
+Checkpoint lokal:
+models/ser_wavlm_v4_best.pt
 
-### Class Index & Label Emosi:
+Repository Hugging Face:
+elnathzzz/wavlm-ser-multilingual
 
-| ID | Label Emosi | Visual Icon |
-| :-: | :---------- | :---------: |
-| 0 | `netral`  |     😐     |
-| 1 | `senang`  |     😊     |
-| 2 | `sedih`   |     😢     |
-| 3 | `marah`   |     😡     |
-| 4 | `takut`   |     😨     |
-| 5 | `jijik`   |     🤢     |
+File checkpoint Hugging Face:
+ser_wavlm_v4_best.pt
 
----
+Backbone:
+microsoft/wavlm-base-plus
+```
 
-## Panduan Instalasi (Step-by-Step)
+Aplikasi menggunakan strategi local-first:
 
-Ikuti langkah-langkah di bawah ini secara berurutan untuk menghindari kesalahan konfigurasi lingkungan (environment):
+1. Aplikasi mencari `models/ser_wavlm_v4_best.pt` terlebih dahulu.
+2. Jika file lokal tidak tersedia, aplikasi mengunduh `ser_wavlm_v4_best.pt` dari repository Hugging Face.
+3. File yang diunduh disimpan di folder `models/` dan digunakan kembali oleh proses berikutnya.
 
-### 1. Clone Repositori & Masuk Direktori
+Checkpoint dimuat menggunakan `strict=True` agar ketidakcocokan antara tensor checkpoint dan arsitektur model langsung terdeteksi.
+
+## Arsitektur Model SER
+
+1. WavLM base-plus.
+2. Attentive Statistics Pooling dengan weighted mean dan weighted standard deviation.
+3. `LayerNorm`.
+4. Dropout `0.30`.
+5. Linear layer berukuran 256.
+6. Aktivasi `GELU`.
+7. Dropout `0.225`.
+8. Linear layer menuju enam kelas emosi.
+
+Implementasi Streamlit diselaraskan dengan `pipeline/ver4-ser-pipeline.ipynb` pada backbone, pooling, classifier, feature extractor, attention mask, dan kontrak preprocessing.
+
+## Kontrak Preprocessing SER
+
+Preprocessing aplikasi disamakan dengan preprocessing inferensi pada pipeline v4.
+
+Urutan proses:
+
+1. Audio diubah menjadi mono.
+2. Audio di-resample ke `16.000 Hz` menggunakan `librosa`.
+3. Nilai NaN dan infinity disanitasi menjadi nol.
+4. Silence trimming dilakukan dengan batas `30 dB`.
+5. Peak normalization dilakukan jika sinyal tidak hening.
+6. Audio lebih panjang dari 4 detik dipotong dari awal.
+7. Audio lebih pendek dari 4 detik diberi zero-padding di sebelah kanan.
+8. Hasil akhir selalu berukuran `64.000` sampel.
+
+Kontrak 4 detik hanya berlaku untuk model SER. Audio untuk Whisper tidak dipotong menjadi 4 detik.
+
+## Transkripsi dan Analisis Segmen Whisper
+
+Whisper memakai model `openai/whisper-small` dan dikonfigurasi untuk Bahasa Indonesia.
+
+Proses STT:
+
+1. Audio didekode dan dijadikan mono.
+2. Audio di-resample ke `16.000 Hz`.
+3. Audio penuh dikirim ke pipeline automatic speech recognition.
+4. Bahasa transkripsi ditetapkan ke Bahasa Indonesia.
+5. Mode per segmen meminta timestamp dari Whisper.
+6. Segmen dengan durasi kurang dari `0,35` detik dilewati.
+7. Jumlah segmen dibatasi maksimal 20 untuk menjaga waktu dan resource inferensi.
+
+Whisper dipreload ketika aplikasi mulai dan dicache dengan `st.cache_resource`. Akibatnya, penantian download model terjadi saat startup deployment, bukan ketika user pertama kali meminta analisis per segmen.
+
+## Pipeline Training v4
+
+Notebook utama training:
+
+```text
+pipeline/ver4-ser-pipeline.ipynb
+```
+
+Versi yang dapat dijalankan di Kaggle:
+
+[Buka notebook SER Pipeline di Kaggle](https://www.kaggle.com/code/elnathh/ser-pipeline)
+
+Panduan penjelasan per cell:
+
+```text
+pipeline/penjelasan_notebook_v4.md
+```
+
+Pipeline v4 mencakup:
+
+- EDA dataset dan pemeriksaan kualitas audio.
+- Silence trimming dan analisis durasi.
+- Split train, validation, dan test.
+- Augmentasi offline untuk sumber data yang ditargetkan.
+- WavLM base-plus.
+- Attentive Statistics Pooling.
+- Focal Loss.
+- Class-specific loss multiplier.
+- Gradual unfreezing backbone.
+- Noise detection berbasis confidence.
+- Stage 2 fine-tuning dengan filtering noise tepercaya.
+- Evaluasi test eksplisit.
+- Classification report dan confusion matrix aktual.
+- Export checkpoint dan artefak evaluasi.
+
+Augmentasi training tidak dijalankan pada audio inferensi. Augmentasi hanya digunakan untuk memperkaya data latih.
+
+## Kelas Emosi
+
+| ID | Label |
+|---:|---|
+| 0 | `netral` |
+| 1 | `senang` |
+| 2 | `sedih` |
+| 3 | `marah` |
+| 4 | `takut` |
+| 5 | `jijik` |
+
+## Struktur Direktori
+
+```text
+ser-streamlit-app/
+├── app.py
+├── config.py
+├── model.py
+├── services.py
+├── utils.py
+├── requirements.txt
+├── AGENTS.md
+├── docs/
+│   ├── tdd_changes_tracker.md
+│   └── walkthrough.md
+├── pages/
+│   ├── analisis.py
+│   ├── dashboard.py
+│   ├── dataset.py
+│   ├── home.py
+│   └── model.py
+├── components/
+│   ├── css.py
+│   ├── recorder.py
+│   └── ui.py
+├── models/
+│   ├── ser_wavlm_v4_best.pt
+│   ├── feature_extractor/
+│   ├── config_v4.json
+│   ├── evaluasi_test_v4.csv
+│   ├── metadata_split_v4.csv
+│   ├── confusion_matrix_v4.png
+│   └── kurva_training_v4.png
+└── pipeline/
+    ├── ver4-ser-pipeline.ipynb
+    └── penjelasan_notebook_v4.md
+```
+
+## Instalasi Lokal
+
+### 1. Clone repository
 
 ```bash
 git clone https://github.com/Elnathz/speech-emotion-detection.git
 cd speech-emotion-detection
 ```
 
-### 2. Buat & Aktifkan Virtual Environment (.venv)
+### 2. Buat virtual environment
 
-> **PENTING:** Selalu gunakan Virtual Environment agar paket tidak mengotori Python sistem global dan terhindar dari bentrok Environment PATH.
+Windows PowerShell:
 
-- **Windows (PowerShell)**:
-  ```powershell
-  python -m venv .venv
-  .\.venv\Scripts\Activate.ps1
-  ```
-- **Linux / macOS (Bash/Zsh)**:
-  ```bash
-  python -m venv .venv
-  source .venv/bin/activate
-  ```
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
 
-### 3. Install Dependensi Python
+Linux atau macOS:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+### 3. Instal dependency
 
 ```bash
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
----
+### 4. Jalankan Streamlit
 
-## Menjalankan Aplikasi
-
-Jalankan Streamlit menggunakan Python Module Runner (`python -m streamlit`) di terminal yang sudah teraktifkan `.venv`:
-
-```powershell
+```bash
 python -m streamlit run app.py
 ```
 
-Aplikasi akan otomatis terbuka di browser pada alamat: `http://localhost:8501`.
+Aplikasi lokal tersedia di `http://localhost:8501`.
 
----
+## Deployment Streamlit
 
-## Troubleshooting & Kesalahan Umum (Gotchas)
+Aplikasi dapat dijalankan melalui Streamlit Community Cloud menggunakan repository GitHub sebagai sumber deployment.
 
-Berikut adalah daftar masalah umum yang sering terjadi beserta solusinya:
+Hal yang perlu diperhatikan:
 
-### 1. `streamlit : The term 'streamlit' is not recognized...`
+- Checkpoint SER lokal dipakai terlebih dahulu jika tersedia.
+- Jika checkpoint lokal tidak tersedia, aplikasi mengunduhnya dari Hugging Face Hub.
+- Whisper small dipreload ketika aplikasi mulai.
+- Model yang sudah dimuat dicache dan dipakai bersama oleh user pada instance yang sama.
+- Jika Community Cloud melakukan hibernasi atau reboot, proses pemuatan model dapat terjadi kembali.
+- Cron job eksternal dapat mengirim request berkala untuk menjaga traffic, tetapi tidak menjamin aplikasi bebas hibernasi atau masalah resource.
 
-- **Penyebab**: Executable `streamlit.exe` berada di folder `Scripts` yang tidak terdaftar di Windows Environment Variable `PATH` sistem.
-- **Solusi**:
-  - Pastikan Virtual Environment `.venv` sudah diaktifkan (`.\.venv\Scripts\Activate.ps1`), ATAU
-  - Jalankan Streamlit dengan perintah `python -m streamlit run app.py`.
+## Troubleshooting
 
-### 2. Error Kompilasi C NumPy / Ninja / GCC (subcommand failed) saat `pip install`
-- **Penyebab**: Menggunakan Python 3.13 dengan `requirements.txt` lama yang mematok `numpy<2.0` atau `numba==0.58.1`. PyPI tidak menyediakan pre-built `.whl` untuk NumPy 1.x pada Python 3.13 sehingga pip mencoba mengompilasi dari C source.
-- **Solusi**: Gunakan file `requirements.txt` terbaru pada repo ini yang sudah melonggarkan batas versi (`numpy>=1.24.0`) agar pip secara otomatis mengunduh wheel binary pra-kompilasi.
+### Checkpoint tidak ditemukan
 
-### 3. `ImportError: cannot import name 'Wav2Vec2FeatureExtractor' from 'transformers'`
-- **Penyebab**: Menjalankan aplikasi Streamlit ketika proses `pip install` di terminal lain belum selesai 100%, atau masalah lazy import pada versi `transformers` tertentu.
-- **Solusi**: Tunggu hingga `pip install -r requirements.txt` selesai penuh. Kode di `app.py` sudah dilengkapi penanganan fallback ke `AutoFeatureExtractor`.
+Pastikan file berikut tersedia:
 
-### 4. `NameError: name 'torch' is not defined`
-- **Penyebab**: Modul `import torch` terhapus atau tertimpa pada baris atas `app.py`.
-- **Solusi**: Pastikan baris `import torch` terpasang di bagian atas file `app.py` sebelum pemanggilan `torch.cuda.is_available()`.
-
-
----
-
-## Struktur Proyek
-
-```
-speech-emotion-detection/
-├── app.py                  # Aplikasi Streamlit utama (UI/UX)
-├── model.py                # Arsitektur WavLMSERModel PyTorch & auto-download model
-├── utils.py                # Preprocessing audio (16kHz mono, 4s crop, STT pipeline)
-├── requirements.txt        # Daftar dependensi Python
-├── AGENTS.md               # Sumber kebenaran operasional & konvensi commit
-├── tdd_changes_tracker.md  # Pencatatan perubahan siklus TDD & audio spec
-├── README.md               # Dokumentasi proyek
-├── models/
-│   └── ser_wavlm_v7_best.pt# Checkpoint model terlatih WavLM v7 (Auto-downloaded)
-└── pipeline/
-    └── ser-augmemted.ipynb # Notebook Jupyter sumber training & eksperimen model v7
+```text
+models/ser_wavlm_v4_best.pt
 ```
 
----
+Jika file tidak ada, pastikan server dapat mengakses Hugging Face Hub.
 
-## Standar Komitmen Kode (Conventional Commits)
+### Gagal mengunduh dari Hugging Face
 
-Proyek ini menerapkan standar Conventional Commits (v1.0.0). Format pesan commit yang diizinkan:
+Periksa koneksi internet. Jika repository Hugging Face dibuat private, tambahkan token Hugging Face pada environment deployment.
 
+### Startup sangat lama
+
+Startup dapat memerlukan waktu karena WavLM dan Whisper small harus dimuat. Tunggu proses selesai dan periksa log deployment sebelum melakukan refresh berulang.
+
+### Aplikasi kehabisan RAM
+
+Whisper small dan WavLM membutuhkan resource besar. Reboot aplikasi untuk membersihkan memory sementara. Jika masalah tetap terjadi, gunakan deployment dengan resource lebih besar atau pisahkan layanan STT dari aplikasi SER.
+
+### Analisis per segmen tidak menampilkan hasil
+
+Periksa apakah Whisper menghasilkan timestamp. Segmen yang lebih pendek dari `0,35` detik memang dilewati oleh aplikasi.
+
+## Verifikasi Teknis
+
+```powershell
+python -m py_compile app.py model.py utils.py services.py
+python -c "import model; import utils; import services; print('[OK] import berhasil')"
 ```
-<type>(<scope>): <subject>
 
-[optional body]
+Checkpoint harus dapat dimuat secara ketat dengan arsitektur model v4. Preprocessing SER harus menghasilkan tensor dengan bentuk `(64000,)`.
 
-Refs: tdd_changes_tracker.md / notebook v7
-```
+## Riwayat Versi Singkat
 
-Tipe commit yang valid: `feat`, `fix`, `refactor`, `docs`, `style`, `test`, `chore`.
-Scope yang valid: `model`, `pipeline`, `ui`, `docs`, `chore`.
+- v1: baseline WavLM dan pipeline dasar.
+- v2: EDA lebih lengkap, focal loss, class-specific weighting, dan noise filtering.
+- v3: pengembangan lanjutan dan checkpoint lineage.
+- v4: model utama yang dipakai Streamlit, dengan evaluasi final dan preprocessing tervalidasi.
+- v5: eksperimen standalone dari WavLM base-plus, bukan model utama aplikasi.
+
+## Referensi Model dan Standar Commit
+
+Model backbone menggunakan `microsoft/wavlm-base-plus` dari Hugging Face. Checkpoint SER hasil fine-tuning tersedia pada repository `elnathzzz/wavlm-ser-multilingual`.
+
+Standar commit repository menggunakan Conventional Commits dengan tipe `feat`, `fix`, `refactor`, `docs`, `style`, `test`, dan `chore`.

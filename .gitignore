@@ -26,6 +26,8 @@ pipeline/*.csv
 pipeline/*.zip
 *.log
 *.tmp
+scratch_*.txt
+pipeline/Dataset/
 
 # ==========================================
 # Virtual Environments
@@ -48,4 +50,3 @@ env/
 .DS_Store
 Thumbs.db
 desktop.ini
-AGENTS.md

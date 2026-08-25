@@ -4,24 +4,31 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import gdown
 import torch
 import torch.nn as nn
-from transformers import WavLMModel
+from huggingface_hub import hf_hub_download
+from transformers import AutoConfig, AutoModel
 
 PRETRAINED_MODEL = "microsoft/wavlm-base-plus"
 HIDDEN_SIZE = 768
 NUM_LABELS = 6
-DEFAULT_DROPOUT = 0.35
+DEFAULT_DROPOUT = 0.30  # Harus identik dengan arsitektur pipeline v4
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = BASE_DIR / "models" / "ser_wavlm_v7_best.pt"
-MODEL_GDRIVE_FILE_ID = "1bdzrBfjqrfejiNbnOBpIi6jFR32_hpVo"
-MODEL_URL = f"https://drive.google.com/uc?id={MODEL_GDRIVE_FILE_ID}"
+MODEL_REPO_ID = "elnathzzz/wavlm-ser-multilingual"
+MODEL_FILENAME = "ser_wavlm_v4_best.pt"
+MODEL_PATH = BASE_DIR / "models" / MODEL_FILENAME
 
 
 class AttentionPooling(nn.Module):
-    """Attention pooling dengan MLP (LayerNorm -> Linear -> Tanh -> Dropout -> Linear)."""
+    """Attentive statistics pooling: weighted mean + weighted std (output hidden*2).
+
+    Arsitektur ini WAJIB identik dengan `AttentiveStatsPooling` pada
+    pipeline/ver4-ser-pipeline.ipynb (sumber kebenaran v4). Checkpoint dilatih dengan
+    fitur [weighted_mean, weighted_std], bukan [attn_pooled, plain_mean].
+    Nama atribut `self.attn` dipertahankan agar key state_dict tetap
+    kompatibel dengan checkpoint (backward-compat loading).
+    """
 
     def __init__(self, hidden_size: int = HIDDEN_SIZE, dropout: float = DEFAULT_DROPOUT):
         super().__init__()
@@ -37,16 +44,23 @@ class AttentionPooling(nn.Module):
         self,
         hidden_states: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         scores = self.attn(hidden_states).squeeze(-1)
         if attention_mask is not None:
-            scores = scores.masked_fill(attention_mask == 0, float("-inf"))
-        weights = torch.softmax(scores, dim=-1)
-        return (hidden_states * weights.unsqueeze(-1)).sum(dim=1)
+            # -1e4 (bukan -inf) untuk mencegah NaN saat seluruh frame dalam
+            # satu sample termasking (softmax(-inf) -> NaN pada edge case).
+            scores = scores.masked_fill(attention_mask == 0, -1e4)
+        weights = torch.softmax(scores, dim=-1).unsqueeze(-1)
+
+        mean = torch.sum(weights * hidden_states, dim=1)
+        variance = torch.sum(weights * (hidden_states - mean.unsqueeze(1)) ** 2, dim=1)
+        std = torch.sqrt(variance.clamp(min=1e-6))
+
+        return torch.cat([mean, std], dim=-1), weights.squeeze(-1)
 
 
 class WavLMSERModel(nn.Module):
-    """Model SER berbasis WavLM dengan attention pooling + mean pooling."""
+    """Model SER berbasis WavLM dengan attentive statistics pooling (mean + std)."""
 
     def __init__(
         self,
@@ -55,12 +69,14 @@ class WavLMSERModel(nn.Module):
         pretrained_model: str = PRETRAINED_MODEL,
     ):
         super().__init__()
-        self.backbone = WavLMModel.from_pretrained(pretrained_model)
-        self.pooling = AttentionPooling(HIDDEN_SIZE, dropout)
+        self.config = AutoConfig.from_pretrained(pretrained_model)
+        self.backbone = AutoModel.from_pretrained(pretrained_model)
+        hidden_size = int(self.config.hidden_size)
+        self.pooling = AttentionPooling(hidden_size, dropout * 0.5)
         self.classifier = nn.Sequential(
-            nn.LayerNorm(HIDDEN_SIZE * 2),
+            nn.LayerNorm(hidden_size * 2),
             nn.Dropout(dropout),
-            nn.Linear(HIDDEN_SIZE * 2, 256),
+            nn.Linear(hidden_size * 2, 256),
             nn.GELU(),
             nn.Dropout(dropout * 0.75),
             nn.Linear(256, num_labels),
@@ -81,17 +97,12 @@ class WavLMSERModel(nn.Module):
                 attention_mask,
             )
 
-        attn_pooled = self.pooling(hidden_states, frame_mask)
-        if frame_mask is not None:
-            mask_expanded = frame_mask.unsqueeze(-1).float()
-            mean_pooled = (hidden_states * mask_expanded).sum(dim=1) / mask_expanded.sum(
-                dim=1
-            ).clamp(min=1e-9)
-        else:
-            mean_pooled = hidden_states.mean(dim=1)
-
-        features = torch.cat([attn_pooled, mean_pooled], dim=-1)
-        return self.classifier(features)
+        # AttentionPooling sudah mengembalikan fitur 1536-dim (attentive
+        # stats: weighted mean + weighted std). Jangan concat mean_pooled
+        # tambahan, itu akan mengubah dimensi classifier dan menyimpang
+        # dari kontrak checkpoint v4.
+        pooled_features, _attn_weights = self.pooling(hidden_states, frame_mask)
+        return self.classifier(pooled_features)
 
 
 def _strip_module_prefix(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -125,22 +136,36 @@ def _extract_state_dict(checkpoint: object) -> dict[str, torch.Tensor]:
 
 
 def ensure_model_downloaded(model_path: Path | str | None = None) -> Path:
-    """Unduh checkpoint dari Google Drive jika file belum ada secara lokal."""
+    """Unduh checkpoint v4 dari Hugging Face Hub jika belum ada secara lokal."""
     path = Path(model_path) if model_path is not None else MODEL_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if path.exists():
         return path
 
-    if not MODEL_GDRIVE_FILE_ID or MODEL_GDRIVE_FILE_ID == "PASTE_FILE_ID_DI_SINI":
-        raise FileNotFoundError(
-            f"File model tidak ditemukan: {path}\n"
-            "Set MODEL_GDRIVE_FILE_ID di model.py atau letakkan checkpoint secara manual."
+    print(f"Mengunduh {MODEL_FILENAME} dari Hugging Face: {MODEL_REPO_ID}")
+    try:
+        downloaded = hf_hub_download(
+            repo_id=MODEL_REPO_ID,
+            filename=MODEL_FILENAME,
+            local_dir=str(path.parent),
+            local_dir_use_symlinks=False,
         )
+    except TypeError:
+        downloaded = hf_hub_download(
+            repo_id=MODEL_REPO_ID,
+            filename=MODEL_FILENAME,
+            local_dir=str(path.parent),
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Gagal mengunduh checkpoint {MODEL_FILENAME} dari Hugging Face "
+            f"({MODEL_REPO_ID}). Pastikan repo publik atau token HF tersedia."
+        ) from exc
 
-    print("Downloading model from Google Drive...")
-    gdown.download(MODEL_URL, str(path), quiet=False)
-
+    downloaded_path = Path(downloaded)
+    if downloaded_path != path and downloaded_path.exists():
+        downloaded_path.replace(path)
     if not path.exists():
         raise RuntimeError(f"Unduhan model gagal. File tidak ditemukan: {path}")
 

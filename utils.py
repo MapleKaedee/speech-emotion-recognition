@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import librosa
 import numpy as np
 import pandas as pd
 import soundfile as sf
@@ -18,7 +19,10 @@ from model import WavLMSERModel
 
 TARGET_SAMPLE_RATE = 16000
 MAX_DURATION_SECONDS = 4.0
+MIN_DURATION_SECONDS = 0.35
 MAX_SAMPLES = int(TARGET_SAMPLE_RATE * MAX_DURATION_SECONDS)
+MIN_SAMPLES = int(TARGET_SAMPLE_RATE * MIN_DURATION_SECONDS)
+SILENCE_TRIM_TOP_DB = 30
 
 LABEL2ID = {
     "netral": 0,
@@ -90,11 +94,51 @@ def load_audio(file: io.BytesIO | str | Path) -> tuple[torch.Tensor, int]:
     return waveform, int(sample_rate)
 
 
+def _trim_silence(y: np.ndarray) -> np.ndarray:
+    """Potong hening di awal/akhir (30 dB), dibuang jika hasil terlalu pendek.
+
+    Guard `len(yt) >= MIN_SAMPLES` mencegah audio lirih (misal rekaman
+    mikrofon bervolume rendah) hilang total akibat trim yang terlalu agresif.
+    Identik dengan `load_waveform()` pada pipeline/ver4-ser-pipeline.ipynb.
+    """
+    trimmed, _ = librosa.effects.trim(y, top_db=SILENCE_TRIM_TOP_DB)
+    if len(trimmed) >= MIN_SAMPLES:
+        return trimmed
+    return y
+
+
+def _peak_normalize(y: np.ndarray) -> np.ndarray:
+    """Normalisasi amplitudo puncak ke [-1.0, 1.0]. Skip jika sinyal nyaris hening."""
+    peak = float(np.max(np.abs(y))) if len(y) else 0.0
+    if peak > 1e-5:
+        return y / peak
+    return y
+
+
+def _fix_length_eval(y: np.ndarray) -> np.ndarray:
+    """Ambil dari awal jika > MAX_SAMPLES, right zero-pad jika lebih pendek.
+
+    Mode eval WAJIB mengambil segmen dari awal agar konsisten dengan
+    `fix_length(mode='eval')` pada pipeline v4.
+    """
+    if len(y) > MAX_SAMPLES:
+        y = y[:MAX_SAMPLES]
+    elif len(y) < MAX_SAMPLES:
+        y = np.pad(y, (0, MAX_SAMPLES - len(y)), mode="constant")
+    return y.astype(np.float32)
+
+
 def preprocess_audio(
     audio: torch.Tensor,
     sample_rate: int,
 ) -> tuple[torch.Tensor, dict[str, Any]]:
-    """Konversi ke mono 16 kHz dan potong/pad maksimal 6 detik."""
+    """Preprocessing SER sesuai kontrak v4 (pipeline Cell 37).
+
+    Urutan wajib: mono -> resample 16kHz -> sanitasi NaN -> trim silence
+    30dB -> peak normalization -> crop dari awal/zero-pad ke MAX_SAMPLES.
+    Menyimpang dari urutan ini membuat input inferensi berbeda dari
+    kondisi training checkpoint v4.
+    """
     if audio.ndim == 1:
         audio = audio.unsqueeze(0)
     if audio.shape[0] > 1:
@@ -102,16 +146,21 @@ def preprocess_audio(
 
     original_duration = audio.shape[-1] / sample_rate
 
+    y = audio.squeeze(0).numpy().astype(np.float32)
     if sample_rate != TARGET_SAMPLE_RATE:
-        audio = torchaudio.functional.resample(audio, sample_rate, TARGET_SAMPLE_RATE)
+        y = librosa.resample(
+            y,
+            orig_sr=sample_rate,
+            target_sr=TARGET_SAMPLE_RATE,
+        )
+    y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+    y = _trim_silence(y)
+    y = _peak_normalize(y)
 
-    if audio.shape[-1] > MAX_SAMPLES:
-        audio = audio[..., :MAX_SAMPLES]
-        trimmed = True
-    else:
-        trimmed = original_duration > MAX_DURATION_SECONDS
+    trimmed = len(y) > MAX_SAMPLES
+    y = _fix_length_eval(y)
 
-    duration_after = audio.shape[-1] / TARGET_SAMPLE_RATE
+    duration_after = len(y) / TARGET_SAMPLE_RATE
     info = {
         "original_sample_rate": sample_rate,
         "target_sample_rate": TARGET_SAMPLE_RATE,
@@ -120,7 +169,7 @@ def preprocess_audio(
         "trimmed": trimmed,
         "max_duration_sec": MAX_DURATION_SECONDS,
     }
-    return audio.squeeze(0), info
+    return torch.from_numpy(y), info
 
 
 def get_audio_info(file: io.BytesIO | str | Path) -> dict[str, Any]:
@@ -144,22 +193,93 @@ def get_audio_info(file: io.BytesIO | str | Path) -> dict[str, Any]:
     }
 
 
+def get_waveform_envelope(file: io.BytesIO | str | Path, num_points: int = 400) -> pd.DataFrame:
+    """Downsample waveform ke envelope min/max per bucket untuk visualisasi ringan (tanpa matplotlib)."""
+    waveform, sample_rate = load_audio(file)
+    y = waveform.squeeze(0).numpy()
+    total_samples = len(y)
+    if total_samples == 0:
+        return pd.DataFrame({"Puncak": [], "Lembah": []})
+
+    bucket_size = max(1, total_samples // num_points)
+    peaks, troughs = [], []
+    for i in range(0, total_samples, bucket_size):
+        chunk = y[i : i + bucket_size]
+        peaks.append(float(chunk.max()))
+        troughs.append(float(chunk.min()))
+
+    duration = total_samples / sample_rate
+    time_axis = np.linspace(0, duration, len(peaks))
+    return pd.DataFrame({"Detik": time_axis, "Puncak": peaks, "Lembah": troughs}).set_index("Detik")
+
+
 def get_transcription_waveform(file: io.BytesIO | str | Path) -> "np.ndarray":
     """Ambil waveform mono 16 kHz PENUH (tanpa potong) untuk transkrip STT."""
     waveform, sample_rate = load_audio(file)
+
+    y = waveform.squeeze(0).numpy().astype(np.float32)
+    y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
     if sample_rate != TARGET_SAMPLE_RATE:
-        waveform = torchaudio.functional.resample(waveform, sample_rate, TARGET_SAMPLE_RATE)
-    return waveform.squeeze(0).numpy().astype("float32")
+        y = librosa.resample(
+            y,
+            orig_sr=sample_rate,
+            target_sr=TARGET_SAMPLE_RATE,
+        )
+
+    y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+    peak = float(np.max(np.abs(y))) if len(y) else 0.0
+    if peak > 1e-5:
+        y = y / peak
+    return y.astype(np.float32)
+
+
+def _whisper_generate_kwargs(language: str) -> dict[str, Any]:
+    """Atur decoding Whisper agar ucapan pendek dan ambigu lebih stabil."""
+    return {
+        "language": language,
+        "task": "transcribe",
+        "num_beams": 5,
+        "temperature": (0.0, 0.2, 0.4, 0.6),
+        "compression_ratio_threshold": 1.35,
+        "logprob_threshold": -1.0,
+        "condition_on_prev_tokens": False,
+    }
 
 
 def transcribe_audio(asr_pipeline: Any, waveform: "np.ndarray", language: str = "indonesian") -> str:
     """Transkrip audio ke teks menggunakan pipeline Whisper (ASR)."""
     output = asr_pipeline(
         {"raw": waveform, "sampling_rate": TARGET_SAMPLE_RATE},
-        generate_kwargs={"language": language, "task": "transcribe"},
+        generate_kwargs=_whisper_generate_kwargs(language),
         chunk_length_s=30,
     )
     return str(output.get("text", "")).strip()
+
+
+def transcribe_audio_segments(
+    asr_pipeline: Any, waveform: "np.ndarray", language: str = "indonesian"
+) -> tuple[str, list[dict[str, Any]]]:
+    """Transkrip audio + timestamp per-segmen (untuk analisis emosi per-segmen)."""
+    output = asr_pipeline(
+        {"raw": waveform, "sampling_rate": TARGET_SAMPLE_RATE},
+        generate_kwargs=_whisper_generate_kwargs(language),
+        chunk_length_s=30,
+        return_timestamps=True,
+    )
+    text = str(output.get("text", "")).strip()
+    segments = [
+        {"text": str(chunk["text"]).strip(), "start": float(chunk["timestamp"][0]), "end": float(chunk["timestamp"][1])}
+        for chunk in output.get("chunks", [])
+        if chunk.get("timestamp") and chunk["timestamp"][0] is not None and chunk["timestamp"][1] is not None
+    ]
+    return text, segments
+
+
+def slice_waveform(waveform: "np.ndarray", start: float, end: float) -> "np.ndarray":
+    """Potong waveform mono 16kHz berdasarkan rentang waktu (detik)."""
+    start_sample = max(0, int(start * TARGET_SAMPLE_RATE))
+    end_sample = min(len(waveform), int(end * TARGET_SAMPLE_RATE))
+    return waveform[start_sample:end_sample]
 
 
 STT_FALLBACK_MESSAGE = "Transkripsi sementara tidak tersedia. Silakan coba lagi nanti."
@@ -169,7 +289,7 @@ _whisper_config_key: tuple[str, str] | None = None
 
 
 def create_whisper_pipeline(model_name: str, device_name: str) -> Any:
-    """Buat pipeline Whisper ASR — hanya dipanggil on-demand, bukan saat startup."""
+    """Buat pipeline Whisper ASR yang dipreload dan dicache oleh Streamlit."""
     from transformers import pipeline
 
     device = 0 if device_name == "cuda" else -1
@@ -222,18 +342,52 @@ def safe_transcribe(
         return STT_FALLBACK_MESSAGE, False
 
 
+def safe_transcribe_segments(
+    file: io.BytesIO | str | Path,
+    model_name: str,
+    device_name: str,
+    language: str = "indonesian",
+    *,
+    pipeline_loader: Any | None = None,
+) -> tuple[str, list[dict[str, Any]], bool]:
+    """Transkrip + segmen waktu. Tidak pernah raise; mengembalikan (teks, segmen, sukses)."""
+    try:
+        if hasattr(file, "seek"):
+            file.seek(0)
+        waveform = get_transcription_waveform(file)
+        asr = get_whisper_pipeline(model_name, device_name, loader=pipeline_loader)
+        text, segments = transcribe_audio_segments(asr, waveform, language)
+        cleaned = text.strip()
+        if not cleaned:
+            return "Tidak ada ucapan yang terdeteksi.", [], True
+        return cleaned, segments, True
+    except Exception:
+        return STT_FALLBACK_MESSAGE, [], False
+
+
 def predict_emotion(
     model: WavLMSERModel,
     processor: Any,
     waveform: torch.Tensor,
     device: torch.device | str,
 ) -> dict[str, Any]:
-    """Jalankan inferensi emosi pada waveform 1D yang sudah dipreprocess."""
+    """Jalankan inferensi emosi pada waveform 1D yang sudah dipreprocess.
+
+    Argumen processor WAJIB identik dengan pemanggilan feature_extractor
+    pada pipeline/ver4-ser-pipeline.ipynb. Tanpa
+    `return_tensors="pt"`, hasil BatchFeature berisi list numpy, bukan
+    tensor, sehingga `.to(device)` melempar AttributeError.
+    """
     device = torch.device(device)
 
     inputs = processor(
-        waveform.numpy(),
+        [waveform.numpy()],
         sampling_rate=TARGET_SAMPLE_RATE,
+        padding=True,
+        truncation=True,
+        max_length=MAX_SAMPLES,
+        return_attention_mask=True,
+        return_tensors="pt",
     )
     input_values = inputs["input_values"].to(device)
     attention_mask = inputs.get("attention_mask")
@@ -264,4 +418,35 @@ def predict_emotion(
         "probabilities": probabilities,
         "logits": logits.squeeze(0).cpu().numpy(),
         "probabilities_df": prob_df,
+    }
+
+
+def summarize_prediction(result: dict) -> dict:
+    """Ringkas prediksi untuk tampilan ranking & margin."""
+    prob_df = result["probabilities_df"]
+    top_pct = float(prob_df.iloc[0]["Persentase (%)"])
+
+    second_label = None
+    second_pct = 0.0
+    if len(prob_df) > 1:
+        second_label = str(prob_df.iloc[1]["Emosi"])
+        second_pct = float(prob_df.iloc[1]["Persentase (%)"])
+
+    margin_pp = top_pct - second_pct
+
+    if margin_pp >= 20:
+        separation = "Pemisahan kuat dari emosi lain"
+    elif margin_pp >= 10:
+        separation = "Pemisahan cukup jelas dari emosi lain"
+    else:
+        separation = "Pemisahan tipis - emosi lain masih dekat"
+
+    return {
+        "top_label": result["predicted_label"],
+        "top_pct": top_pct,
+        "second_label": second_label,
+        "second_pct": second_pct,
+        "margin_pp": margin_pp,
+        "separation": separation,
+        "num_classes": len(prob_df),
     }
