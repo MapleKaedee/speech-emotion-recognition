@@ -1,0 +1,32 @@
+name: Streamlit Heartbeat
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+      timezone: "Asia/Jakarta"
+
+permissions: {}
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Playwright
+        run: npm install --no-save playwright
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Open Streamlit app
+        run: node scripts/keep_streamlit_alive.mjs

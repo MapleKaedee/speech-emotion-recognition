@@ -216,26 +216,41 @@ def get_waveform_envelope(file: io.BytesIO | str | Path, num_points: int = 400) 
 def get_transcription_waveform(file: io.BytesIO | str | Path) -> "np.ndarray":
     """Ambil waveform mono 16 kHz PENUH (tanpa potong) untuk transkrip STT."""
     waveform, sample_rate = load_audio(file)
+
+    y = waveform.squeeze(0).numpy().astype(np.float32)
+    y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
     if sample_rate != TARGET_SAMPLE_RATE:
-        waveform = torchaudio.functional.resample(waveform, sample_rate, TARGET_SAMPLE_RATE)
-    return waveform.squeeze(0).numpy().astype("float32")
+        y = librosa.resample(
+            y,
+            orig_sr=sample_rate,
+            target_sr=TARGET_SAMPLE_RATE,
+        )
+
+    y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+    peak = float(np.max(np.abs(y))) if len(y) else 0.0
+    if peak > 1e-5:
+        y = y / peak
+    return y.astype(np.float32)
+
+
+def _whisper_generate_kwargs(language: str) -> dict[str, Any]:
+    """Atur decoding Whisper agar ucapan pendek dan ambigu lebih stabil."""
+    return {
+        "language": language,
+        "task": "transcribe",
+        "num_beams": 5,
+        "temperature": (0.0, 0.2, 0.4, 0.6),
+        "compression_ratio_threshold": 1.35,
+        "logprob_threshold": -1.0,
+        "condition_on_prev_tokens": False,
+    }
 
 
 def transcribe_audio(asr_pipeline: Any, waveform: "np.ndarray", language: str = "indonesian") -> str:
     """Transkrip audio ke teks menggunakan pipeline Whisper (ASR)."""
     output = asr_pipeline(
         {"raw": waveform, "sampling_rate": TARGET_SAMPLE_RATE},
-        generate_kwargs={
-            "language": language,
-            "task": "transcribe",
-            "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
-            "compression_ratio_threshold": 2.4,
-            "logprob_threshold": -1.0,
-            "no_speech_threshold": 0.6,
-            # condition_on_prev_tokens=False (bukan default True ala CLI OpenAI): mencegah
-            # satu segmen yang berhalusinasi/nge-loop meracuni konteks segmen berikutnya.
-            "condition_on_prev_tokens": False,
-        },
+        generate_kwargs=_whisper_generate_kwargs(language),
         chunk_length_s=30,
     )
     return str(output.get("text", "")).strip()
@@ -247,15 +262,7 @@ def transcribe_audio_segments(
     """Transkrip audio + timestamp per-segmen (untuk analisis emosi per-segmen)."""
     output = asr_pipeline(
         {"raw": waveform, "sampling_rate": TARGET_SAMPLE_RATE},
-        generate_kwargs={
-            "language": language,
-            "task": "transcribe",
-            "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
-            "compression_ratio_threshold": 2.4,
-            "logprob_threshold": -1.0,
-            "no_speech_threshold": 0.6,
-            "condition_on_prev_tokens": False,
-        },
+        generate_kwargs=_whisper_generate_kwargs(language),
         chunk_length_s=30,
         return_timestamps=True,
     )
@@ -432,7 +439,7 @@ def summarize_prediction(result: dict) -> dict:
     elif margin_pp >= 10:
         separation = "Pemisahan cukup jelas dari emosi lain"
     else:
-        separation = "Pemisahan tipis — emosi lain masih dekat"
+        separation = "Pemisahan tipis - emosi lain masih dekat"
 
     return {
         "top_label": result["predicted_label"],

@@ -6,7 +6,7 @@ import altair as alt
 import streamlit as st
 
 from config import EMOTION_COLORS
-from services import load_dataset_metadata, load_label_noise_candidates
+from services import DATASET_METADATA_PATH, load_dataset_metadata, load_label_noise_candidates
 from utils import ID2LABEL
 from components.css import inject_custom_css
 from components.ui import render_section_header
@@ -33,7 +33,7 @@ def main() -> None:
 
     df = load_dataset_metadata()
     if df is None:
-        st.warning("File metadata dataset (models/metadata_split_v4.csv) tidak ditemukan.")
+        st.warning(f"File metadata dataset ({DATASET_METADATA_PATH.name}) tidak ditemukan.")
         return
 
     c1, c2, c3, c4 = st.columns(4)

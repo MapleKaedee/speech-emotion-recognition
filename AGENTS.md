@@ -80,7 +80,7 @@ Perubahan lokal user adalah milik user. Agent **DILARANG** menghapus, memulihkan
 
 Sumber kebenaran untuk aturan bisnis, preprocessing audio, dan arsitektur model adalah:
 
-1. `tdd_changes_tracker.md` untuk riwayat keputusan, perubahan spesifikasi, dan skenario pengujian.
+1. `docs/tdd_changes_tracker.md` untuk riwayat keputusan, perubahan spesifikasi, dan skenario pengujian.
 2. `pipeline/ver2-ser-pipeline.ipynb` sebagai referensi pekerjaan terakhir yang sedang dijadikan baseline oleh user.
 3. `pipeline/ver3-ser-pipeline.ipynb` sebagai target pengembangan berikutnya.
 4. Kode inferensi aktif pada `model.py`, `utils.py`, `services.py`, dan `app.py`.
@@ -92,7 +92,7 @@ Jika ada konflik antara tracker, `ver2-ser-pipeline.ipynb`, kode aktif, atau ins
 - Jangan memilih salah satu secara diam-diam.
 - Jelaskan konflik dan dampaknya.
 - Minta keputusan user sebelum mengubah logika.
-- Jika perubahan spesifikasi disetujui, catat keputusan tersebut di `tdd_changes_tracker.md` dalam scope terpisah.
+- Jika perubahan spesifikasi disetujui, catat keputusan tersebut di `docs/tdd_changes_tracker.md` dalam scope terpisah.
 
 ## 5. Aturan Khusus Notebook Pipeline
 
@@ -103,7 +103,7 @@ Aturan ini berlaku untuk semua pekerjaan notebook:
 - Semua pengembangan atau eksperimen baru harus dilakukan di `pipeline/ver3-ser-pipeline.ipynb` setelah user menyetujui perubahan.
 - Agent tidak boleh mengubah nama notebook, membuat versi baru, atau menyalin isi notebook secara otomatis tanpa persetujuan.
 - Sebelum mengedit `ver3`, agent harus memastikan path yang dipakai tepat, memeriksa status git, dan memastikan perubahan tidak masuk ke `ver2`.
-- Perubahan pada preprocessing, parameter training, arsitektur, augmentasi, atau aturan inferensi wajib dicatat di `tdd_changes_tracker.md` setelah perubahan disetujui.
+- Perubahan pada preprocessing, parameter training, arsitektur, augmentasi, atau aturan inferensi wajib dicatat di `docs/tdd_changes_tracker.md` setelah perubahan disetujui.
 - Notebook harus tetap kompatibel dengan lingkungan Kaggle, termasuk path `/kaggle/working/`, `/kaggle/input/`, keterbatasan RAM, timeout, dan penulisan output disk.
 
 ## 6. Arsitektur dan Scope Aplikasi
@@ -118,8 +118,8 @@ Komponen utama:
 - `services.py`: layanan pendukung seperti STT atau orkestrasi inference.
 - `models/`: checkpoint model lokal.
 - `pipeline/`: notebook eksperimen dan pipeline training.
-- `tdd_changes_tracker.md`: catatan keputusan dan perubahan TDD.
-- `walkthrough.md`: catatan progres dan hasil pengerjaan di root repositori.
+- `docs/tdd_changes_tracker.md`: catatan keputusan dan perubahan TDD.
+- `docs/walkthrough.md`: catatan progres dan hasil pengerjaan proyek.
 
 Scope utama repositori adalah inferensi dan antarmuka. Perubahan training atau pipeline hanya boleh dilakukan jika user memintanya atau perubahan tersebut memang diperlukan untuk tujuan yang disetujui.
 
@@ -190,8 +190,8 @@ Sebelum menyatakan selesai, agent juga harus:
 - Memeriksa `git diff` dan memastikan hanya file yang disetujui yang berubah.
 - Memindai file yang diubah untuk em-dash, emoji dekoratif, dan label emosi yang salah.
 - Memastikan perubahan lokal yang tidak terkait tetap utuh.
-- Memperbarui `walkthrough.md` untuk task yang benar-benar sudah dikerjakan, jika update tersebut termasuk dalam scope yang disetujui.
-- Memperbarui `tdd_changes_tracker.md` jika perubahan menyentuh preprocessing, model, pipeline, atau aturan inferensi.
+- Memperbarui `docs/walkthrough.md` untuk task yang benar-benar sudah dikerjakan, jika update tersebut termasuk dalam scope yang disetujui.
+- Memperbarui `docs/tdd_changes_tracker.md` jika perubahan menyentuh preprocessing, model, pipeline, atau aturan inferensi.
 
 Agent tidak boleh mengatakan `selesai`, `fixed`, `pass`, atau istilah setara jika verifikasi belum dijalankan atau hasilnya gagal.
 

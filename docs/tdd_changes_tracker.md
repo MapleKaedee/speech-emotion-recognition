@@ -1,5 +1,37 @@
 # TDD Changes Tracker
 
+## [2026-08-24] Peningkatan Sensitivitas Transkripsi Whisper
+
+### Diagnosis
+
+Transkripsi rekaman pendek seperti "ini kok gitu sih" dapat keluar sebagai teks yang tidak sesuai. Audit terhadap jalur STT menunjukkan waveform hanya diubah menjadi mono dan 16 kHz, tanpa sanitasi nilai non-finite atau peak normalization. Decoding Whisper juga hanya menerima bahasa dan task, tanpa beam search maupun parameter fallback untuk keluaran yang ambigu.
+
+### File Terdampak
+
+- [utils.py](../utils.py)
+- [tests/test_whisper_transcription.py](../tests/test_whisper_transcription.py)
+
+### Perubahan
+
+1. Waveform STT tetap menggunakan audio penuh dan tidak dipotong menjadi 4 detik.
+2. Nilai NaN dan infinity disanitasi menjadi nol sebelum dan sesudah resampling.
+3. Peak normalization diterapkan pada waveform yang tidak hening agar rekaman mikrofon dengan level rendah lebih mudah dikenali Whisper.
+4. Resampling STT memakai `librosa` ke 16 kHz, terpisah dari kontrak preprocessing SER.
+5. Decoding Whisper menggunakan `num_beams=5`, temperature fallback `(0.0, 0.2, 0.4, 0.6)`, `compression_ratio_threshold=1.35`, `logprob_threshold=-1.0`, dan `condition_on_prev_tokens=False`.
+6. Konfigurasi decoding yang sama dipakai untuk transkrip penuh dan transkrip bertimestamp per segmen.
+
+### Verifikasi
+
+- Test sebelum implementasi gagal karena waveform masih mengandung NaN dan parameter decoding belum diteruskan.
+- `python -m unittest discover -s tests -p 'test_*.py' -v` berhasil, 3 test lulus.
+- Test mencakup sanitasi, resampling, normalisasi, transkrip penuh, dan transkrip per segmen menggunakan fake pipeline.
+
+### Batasan
+
+- Rekaman mikrofon asli yang menghasilkan transkrip "ini dosi" tidak tersimpan, sehingga perbaikan pada kalimat tersebut belum dapat diukur langsung.
+- Peningkatan akurasi umum Whisper belum boleh diklaim sebagai angka WER tanpa dataset audio berlabel.
+- Whisper small tetap dipakai agar kebutuhan RAM dan cold start deployment tidak meningkat.
+
 ## [2026-08-24] Preload Whisper Small untuk Analisis Transkrip dan Segmen
 
 ### Rincian Perubahan
@@ -19,11 +51,11 @@
 
 ### File Terdampak
 
-- [model.py](model.py)
-- [utils.py](utils.py)
-- [services.py](services.py)
-- [config.py](config.py)
-- [requirements.txt](requirements.txt)
+- [model.py](../model.py)
+- [utils.py](../utils.py)
+- [services.py](../services.py)
+- [config.py](../config.py)
+- [requirements.txt](../requirements.txt)
 - [walkthrough.md](walkthrough.md)
 
 ### Rincian Perubahan
@@ -46,7 +78,7 @@
 
 ### File Terdampak
 
-- [pipeline/ver5-ser-pipeline.ipynb](pipeline/ver5-ser-pipeline.ipynb)
+- `pipeline/ver5-ser-pipeline.ipynb`
 - [tdd_changes_tracker.md](tdd_changes_tracker.md)
 
 ### Rincian Perubahan Skenario dan Logic
@@ -69,8 +101,8 @@
 
 ### File Terdampak
 
-- [pipeline/ser-pipeline.ipynb](pipeline/ser-pipeline.ipynb)
-- [pipeline/ser_wavlm_v3_best.pt](pipeline/ser_wavlm_v3_best.pt)
+- `pipeline/ser-pipeline.ipynb`
+- `pipeline/ser_wavlm_v3_best.pt`
 - [tdd_changes_tracker.md](tdd_changes_tracker.md)
 
 ### Rincian Perubahan Skenario dan Logic
@@ -129,7 +161,7 @@
 ### Rincian Perubahan Skenario & Logic:
 
 1. **Pembersihan Emoji Dekoratif & Simbol Non-Standard**:
-   - **Sebelum:** Penggunaan emoji visual secara masif pada judul markdown, header, dan perintah print (`🔍`, `✅`, `❌`, `🛑`, `📌`, `🖥️`, `📂`, `📊`, `🔄`, `🔧`, `⏹`, `📉`, `🔁`, `🟡`, `📥`).
+   - **Sebelum:** Penggunaan emoji visual secara masif pada judul markdown, header, dan perintah print.
    - **Sesudah:** Mengubah seluruh output log dan header markdown menjadi string teks terstruktur standar berbasis tag profesional seperti `[OK]`, `[NOT FOUND]`, `[ERROR]`, `[CHECK]`, `[NOTE]`, `[STATS]`, `[CONFIG]`, `[BEST]`.
    - **Alasan:** Memenuhi standar Nol AI Slop proyek, meningkatkan keterbacaan log di terminal tanpa ketergantungan render font emoji, dan mencegah masalah encoding cp1252 pada lingkungan Windows.
 

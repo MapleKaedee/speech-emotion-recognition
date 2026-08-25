@@ -10,7 +10,10 @@ from sklearn.metrics import classification_report
 
 from config import MODEL_DISPLAY_PATH, SER_BACKBONE
 from services import (
+    MODELS_DIR,
+    TEST_EVALUATION_PATH,
     TRAINING_CURVE_IMAGE_PATH,
+    TRAINING_HISTORY_PATH,
     load_model_metrics,
     load_ser_model,
     load_test_evaluation,
@@ -183,13 +186,31 @@ def main() -> None:
             width="stretch",
         )
     else:
-        st.info("File history_v4.json tidak ditemukan — kurva training tidak dapat ditampilkan.")
+        training_curve_path = MODELS_DIR / "kurva_training_v4.png"
+        if training_curve_path.exists():
+            st.image(
+                str(training_curve_path),
+                caption="Kurva training model v4",
+                use_container_width=True,
+            )
+            st.caption(
+                f"{TRAINING_HISTORY_PATH.name} belum tersedia. "
+                "Grafik ditampilkan dari artefak kurva training v4."
+            )
+        else:
+            st.info(
+                f"File {TRAINING_HISTORY_PATH.name} dan artefak kurva training v4 "
+                "tidak ditemukan."
+            )
 
     eval_df = load_test_evaluation()
     if eval_df is not None:
         _render_confusion_matrix(eval_df)
     else:
-        st.info("File evaluasi_test_v4.csv tidak ditemukan — confusion matrix tidak dapat ditampilkan.")
+        st.info(
+            f"File {TEST_EVALUATION_PATH.name} tidak ditemukan. "
+            "Confusion matrix tidak dapat ditampilkan."
+        )
 
     with st.expander("Konfigurasi Training"):
         st.caption(f"Backbone: {SER_BACKBONE}")

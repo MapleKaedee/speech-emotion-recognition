@@ -109,6 +109,16 @@ Notebook utama training:
 pipeline/ver4-ser-pipeline.ipynb
 ```
 
+Versi yang dapat dijalankan di Kaggle:
+
+[Buka notebook SER Pipeline di Kaggle](https://www.kaggle.com/code/elnathh/ser-pipeline)
+
+Panduan penjelasan per cell:
+
+```text
+pipeline/penjelasan_notebook_v4.md
+```
+
 Pipeline v4 mencakup:
 
 - EDA dataset dan pemeriksaan kualitas audio.
@@ -150,8 +160,9 @@ ser-streamlit-app/
 ├── utils.py
 ├── requirements.txt
 ├── AGENTS.md
-├── tdd_changes_tracker.md
-├── walkthrough.md
+├── docs/
+│   ├── tdd_changes_tracker.md
+│   └── walkthrough.md
 ├── pages/
 │   ├── analisis.py
 │   ├── dashboard.py
@@ -171,7 +182,8 @@ ser-streamlit-app/
 │   ├── confusion_matrix_v4.png
 │   └── kurva_training_v4.png
 └── pipeline/
-    └── ver4-ser-pipeline.ipynb
+    ├── ver4-ser-pipeline.ipynb
+    └── penjelasan_notebook_v4.md
 ```
 
 ## Instalasi Lokal
